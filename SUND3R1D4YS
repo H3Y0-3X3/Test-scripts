@@ -1,10 +1,11 @@
 -- ============================================================
---  SUND3R1D4YS | FULL SCRIPT v10
---  Aimbot / Silent / Trigger / ESP / Crosshair / Watermark
---  Visual: FOV / Ratio (visual stretch) / Model Avatar / No Texture
+--  SUND3R1D4YS | FULL SCRIPT v11
+--  Aimbot / Silent / Trigger / ESP / Crosshair / Watermark / Visual
 --  Config system + autoload
---  Menu: RightAlt | Binds: MouseButton2 (default)
+--  Menu: RightAlt
 -- ============================================================
+print("[SUND3R1D4YS] Script started")
+
 local Players          = game:GetService("Players")
 local RunService       = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -60,7 +61,7 @@ end
 -- ============================================================
 local CFG_FOLDER = "SUND3R1D4YS_CFG/"
 local AUTOLOAD_FILE = CFG_FOLDER .. "autoload.txt"
-if not isfolder(CFG_FOLDER) then makefolder(CFG_FOLDER) end
+pcall(function() if not isfolder(CFG_FOLDER) then makefolder(CFG_FOLDER) end end)
 
 local function serializeTable(tbl, indent)
     indent = indent or ""
@@ -119,40 +120,53 @@ local function applySnapshot(snap)
 end
 local function saveConfig(name)
     if not name or name=="" then return false end
-    writefile(CFG_FOLDER..name..".txt", "return "..serializeTable(getSnapshot()))
-    return true
+    local ok = pcall(function() writefile(CFG_FOLDER..name..".txt", "return "..serializeTable(getSnapshot())) end)
+    return ok
 end
 local function loadConfig(name)
     if not name or name=="" then return false end
     local path = CFG_FOLDER..name..".txt"
-    if not isfile(path) then return false end
+    local ok, exists = pcall(isfile, path)
+    if not ok or not exists then return false end
     local snap = deserializeTable(readfile(path):gsub("^return%s*",""))
     if not snap then return false end
     return applySnapshot(snap)
 end
 local function deleteConfig(name)
     local path = CFG_FOLDER..name..".txt"
-    if isfile(path) then delfile(path) return true end
+    local ok, exists = pcall(isfile, path)
+    if ok and exists then pcall(delfile, path) return true end
     return false
 end
 local function setAutoload(name)
-    if not name or name=="" then if isfile(AUTOLOAD_FILE) then delfile(AUTOLOAD_FILE) end return end
-    writefile(AUTOLOAD_FILE, name)
+    if not name or name=="" then pcall(function() if isfile(AUTOLOAD_FILE) then delfile(AUTOLOAD_FILE) end end) return end
+    pcall(function() writefile(AUTOLOAD_FILE, name) end)
 end
 local function getAutoload()
-    if isfile(AUTOLOAD_FILE) then local n=readfile(AUTOLOAD_FILE); if n and n~="" then return n end end
+    local ok, exists = pcall(isfile, AUTOLOAD_FILE)
+    if ok and exists then local n = readfile(AUTOLOAD_FILE); if n and n~="" then return n end end
     return nil
 end
 
 -- ============================================================
---  4. MAIN GUI
+--  4. MAIN GUI (gethui для Real)
 -- ============================================================
+local function getHiddenUI()
+    if gethui then
+        local ok, ui = pcall(gethui)
+        if ok and ui then return ui end
+    end
+    return CoreGui
+end
+
 local MainGui = Instance.new("ScreenGui")
 MainGui.Name = "SUND3R1D4YS_Main"
 MainGui.ResetOnSpawn = false
 MainGui.IgnoreGuiInset = true
 MainGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-MainGui.Parent = CoreGui
+MainGui.DisplayOrder = 999999
+MainGui.Parent = getHiddenUI()
+print("[SUND3R1D4YS] GUI created")
 
 -- ============================================================
 --  5. WATERMARK
@@ -324,7 +338,8 @@ local function getClosestTarget(fov, teamCheck, wallCheck, partName)
         if dist > closestDist then continue end
         if wallCheck then
             local ray = Ray.new(Camera.CFrame.Position, part.Position - Camera.CFrame.Position)
-            if workspace:FindPartOnRayWithIgnoreList(ray, {LocalPlayer.Character, plr.Character}) then continue end
+            local hit = workspace:FindPartOnRayWithIgnoreList(ray, {LocalPlayer.Character, plr.Character})
+            if hit then continue end
         end
         closest, closestDist = part, dist
     end
@@ -335,7 +350,6 @@ end
 --  10. BINDS
 -- ============================================================
 UserInputService.InputBegan:Connect(function(i, gpe)
-    if gpe then return end
     for name,key in pairs(Config.Keybinds) do
         local match
         if typeof(key)=="EnumItem" and key.EnumType==Enum.KeyCode then match=(i.KeyCode==key)
@@ -360,7 +374,7 @@ local function bindActive(name)
 end
 
 -- ============================================================
---  11. AIMBOT (fixed: snap instant + smooth + FOV only when active)
+--  11. AIMBOT
 -- ============================================================
 RunService.RenderStepped:Connect(function()
     local active = Config.Aimbot.Enabled or bindActive("Aimbot")
@@ -376,7 +390,7 @@ RunService.RenderStepped:Connect(function()
         if target then
             local goal = CFrame.new(Camera.CFrame.Position, target.Position)
             if Config.Aimbot.Smooth >= 0.99 then
-                Camera.CFrame = goal  -- instant snap
+                Camera.CFrame = goal
             else
                 Camera.CFrame = Camera.CFrame:Lerp(goal, 1 - Config.Aimbot.Smooth)
             end
@@ -406,9 +420,9 @@ local function drawLine(frame, p1, p2)
 end
 local function clearESPForPlayer(plr)
     if espCache[plr] then
-        for _,l in ipairs(espCache[plr].boxLines) do l:Destroy() end
-        for _,l in ipairs(espCache[plr].skeletonLines) do l:Destroy() end
-        if espCache[plr].chams then espCache[plr].chams:Destroy() end
+        for _,l in ipairs(espCache[plr].boxLines) do pcall(function() l:Destroy() end) end
+        for _,l in ipairs(espCache[plr].skeletonLines) do pcall(function() l:Destroy() end) end
+        if espCache[plr].chams then pcall(function() espCache[plr].chams:Destroy() end) end
         espCache[plr] = nil
     end
 end
@@ -505,72 +519,67 @@ end)
 -- ============================================================
 --  13. SILENT AIM
 -- ============================================================
-local oldIndex
-oldIndex = hookmetamethod(game, "__index", function(t, k)
-    if checkcaller() then return oldIndex(t,k) end
-    if (Config.Silent.Enabled or bindActive("Silent")) and t:IsA("Mouse") and (k=="Hit" or k=="Target") then
-        local target = getClosestTarget(Config.Silent.FOV, true, Config.Silent.WallCheck, Config.Silent.Hitbox)
-        if target then
-            if k=="Hit" then return CFrame.new(target.Position + target.Velocity*Config.Silent.Prediction)
-            else return target end
-        end
-    end
-    return oldIndex(t,k)
-end)
-
-local oldNamecall
-oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-    local method = getnamecallmethod()
-    if checkcaller() then return oldNamecall(self, ...) end
-    if (Config.Silent.Enabled or bindActive("Silent")) then
-        local args = {...}
-        if (method=="FindPartOnRayWithIgnoreList" or method=="FindPartOnRay") and args[1] then
+pcall(function()
+    local oldIndex
+    oldIndex = hookmetamethod(game, "__index", function(t, k)
+        if checkcaller() then return oldIndex(t,k) end
+        if (Config.Silent.Enabled or bindActive("Silent")) and t:IsA("Mouse") and (k=="Hit" or k=="Target") then
             local target = getClosestTarget(Config.Silent.FOV, true, Config.Silent.WallCheck, Config.Silent.Hitbox)
             if target then
-                local origin = args[1].Origin
-                args[1] = Ray.new(origin, (target.Position-origin).Unit*1000)
+                if k=="Hit" then return CFrame.new(target.Position + target.Velocity*Config.Silent.Prediction)
+                else return target end
             end
-            return oldNamecall(self, table.unpack(args))
         end
-    end
-    return oldNamecall(self, ...)
+        return oldIndex(t,k)
+    end)
+
+    local oldNamecall
+    oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+        local method = getnamecallmethod()
+        if checkcaller() then return oldNamecall(self, ...) end
+        if (Config.Silent.Enabled or bindActive("Silent")) then
+            local args = {...}
+            if (method=="FindPartOnRayWithIgnoreList" or method=="FindPartOnRay") and args[1] then
+                local target = getClosestTarget(Config.Silent.FOV, true, Config.Silent.WallCheck, Config.Silent.Hitbox)
+                if target then
+                    local origin = args[1].Origin
+                    args[1] = Ray.new(origin, (target.Position-origin).Unit*1000)
+                end
+                return oldNamecall(self, table.unpack(args))
+            end
+        end
+        return oldNamecall(self, ...)
+    end)
 end)
 
 -- ============================================================
---  14. TRIGGERBOT (fixed: ViewportPointToRay instead of Mouse.Target)
+--  14. TRIGGERBOT
 -- ============================================================
 local lastClick = 0
 RunService.RenderStepped:Connect(function()
     if not (Config.Trigger.Enabled or bindActive("Trigger")) then return end
     if tick() - lastClick < Config.Trigger.Delay then return end
-
     local mousePos = UserInputService:GetMouseLocation()
     local ray = Camera:ViewportPointToRay(mousePos.X, mousePos.Y)
-
     local params = RaycastParams.new()
     params.FilterType = Enum.RaycastFilterType.Exclude
     params.FilterDescendantsInstances = { LocalPlayer.Character }
-
     local result = workspace:Raycast(ray.Origin, ray.Direction * 1500, params)
     if not result then return end
-
     local hit = result.Instance
     local char = hit:FindFirstAncestorOfClass("Model")
     if not char then return end
-
     local plr = Players:GetPlayerFromCharacter(char)
     if not plr or plr == LocalPlayer then return end
     if Config.Trigger.TeamCheck and plr.Team == LocalPlayer.Team then return end
-
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not hum or hum.Health <= 0 then return end
-
     lastClick = tick()
     pcall(mouse1click)
 end)
 
 -- ============================================================
---  15. VISUAL: FOV (applied every frame)
+--  15. VISUAL: FOV
 -- ============================================================
 local originalFOV = Camera.FieldOfView
 RunService.RenderStepped:Connect(function()
@@ -586,28 +595,28 @@ RunService.RenderStepped:Connect(function()
 end)
 
 -- ============================================================
---  16. VISUAL: Ratio (visual stretch via camera matrix)
+--  16. VISUAL: Ratio
 -- ============================================================
 local ratioActive, ratioFactor = false, 1.0
 local function setRatio(enabled, factor)
     ratioActive = enabled
     ratioFactor = factor or 1.0
 end
-
-RunService:BindToRenderStep("SUND3R1D4YS_Ratio", Enum.RenderPriority.Camera.Value + 1, function()
-    if not ratioActive or ratioFactor == 1.0 then return end
-    local cam = workspace.CurrentCamera
-    if not cam then return end
-    local cf = cam.CFrame
-    local scaleMatrix = CFrame.new(0,0,0, 1,0,0, 0,1/ratioFactor,0, 0,0,1)
-    cam.CFrame = cf * scaleMatrix
+pcall(function()
+    RunService:BindToRenderStep("SUND3R1D4YS_Ratio", Enum.RenderPriority.Camera.Value + 1, function()
+        if not ratioActive or ratioFactor == 1.0 then return end
+        local cam = workspace.CurrentCamera
+        if not cam then return end
+        local cf = cam.CFrame
+        local scaleMatrix = CFrame.new(0,0,0, 1,0,0, 0,1/ratioFactor,0, 0,0,1)
+        cam.CFrame = cf * scaleMatrix
+    end)
 end)
 
 -- ============================================================
---  17. VISUAL: Model Avatar (Material swap + transparency)
+--  17. VISUAL: Model Avatar
 -- ============================================================
 local avatarOriginal = {}
-
 local function restoreAvatarMaterials()
     for part, data in pairs(avatarOriginal) do
         if part and part.Parent then
@@ -619,12 +628,10 @@ local function restoreAvatarMaterials()
     end
     avatarOriginal = {}
 end
-
 local function applyAvatarMode()
     restoreAvatarMaterials()
     local mode = Config.Visual.AvatarMode
     if mode == "Off" then return end
-
     for _,plr in ipairs(Players:GetPlayers()) do
         if plr==LocalPlayer then continue end
         local char = plr.Character
@@ -643,7 +650,6 @@ local function applyAvatarMode()
         end
     end
 end
-
 for _,plr in ipairs(Players:GetPlayers()) do
     plr.CharacterAdded:Connect(function()
         if Config.Visual.AvatarMode ~= "Off" then
@@ -666,7 +672,6 @@ end)
 -- ============================================================
 local noTextureActive = false
 local textureConn = nil
-
 local function stripTexturesFrom(root)
     for _,v in ipairs(root:GetDescendants()) do
         if v:IsA("Decal") or v:IsA("Texture") or v:IsA("SurfaceAppearance") then
@@ -674,7 +679,6 @@ local function stripTexturesFrom(root)
         end
     end
 end
-
 local function setNoTexture(enabled)
     noTextureActive = enabled
     if textureConn then textureConn:Disconnect() textureConn = nil end
@@ -688,7 +692,6 @@ local function setNoTexture(enabled)
         end)
     end
 end
-
 local function applyVisualSettings()
     setRatio(Config.Visual.RatioEnabled, Config.Visual.RatioValue)
     applyAvatarMode()
@@ -844,7 +847,9 @@ local function makeToggle(parent, text, default, callback, refKey)
         dot.Position = on and UDim2.new(1,-16,0,2) or UDim2.fromOffset(2,2)
         dot.BackgroundColor3 = on and Color3.fromRGB(0,140,255) or Color3.fromRGB(120,120,140)
         toggle.BackgroundColor3 = on and Color3.fromRGB(0,70,140) or Color3.fromRGB(40,40,55)
-        if callback and not silent then callback(on) end
+        if callback and not silent then
+            pcall(callback, on)
+        end
     end
     toggle.MouseButton1Click:Connect(function() apply(not state.value) end)
     apply(default, true)
@@ -889,12 +894,12 @@ local function makeSlider(parent, text, min, max, default, callback, refKey)
         local val = math.floor(min + (max-min)*pct)
         fill.Size = UDim2.new(pct,0,1,0)
         label.Text = text.."  ["..val.."]"
-        if callback and not silent then callback(val) end
+        if callback and not silent then pcall(callback, val) end
     end
     bar.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then dragging=true; update(i.Position.X) end end)
     UserInputService.InputChanged:Connect(function(i) if dragging and i.UserInputType==Enum.UserInputType.MouseMovement then update(i.Position.X) end end)
     UserInputService.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then dragging=false end end)
-    callback(default)
+    if callback then pcall(callback, default) end
     if refKey then
         uiRefs[refKey] = { kind="slider", min=min, max=max, label=label, text=text,
             setValue = function(val)
@@ -947,11 +952,11 @@ local function makeBind(parent, label, currentKey, onChange)
         if i.UserInputType==Enum.UserInputType.Keyboard then
             listening=false; btn.Text="Bind"
             lbl.Text = label..": "..i.KeyCode.Name
-            onChange(i.KeyCode)
+            pcall(onChange, i.KeyCode)
         elseif i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.MouseButton2 or i.UserInputType==Enum.UserInputType.MouseButton3 then
             listening=false; btn.Text="Bind"
             lbl.Text = label..": "..keyName(i.UserInputType)
-            onChange(i.UserInputType)
+            pcall(onChange, i.UserInputType)
         end
     end)
 end
@@ -1240,13 +1245,14 @@ UserInputService.InputChanged:Connect(function(i)
     end
 end)
 
+-- RightAlt toggle (без проверки gpe, чтобы работало всегда)
 UserInputService.InputBegan:Connect(function(i, gpe)
-    if gpe then return end
     if i.KeyCode == Config.MenuKey then
         Config.MenuOpen = not Config.MenuOpen
         Menu.Visible = Config.MenuOpen
+        print("[SUND3R1D4YS] Menu toggled:", Menu.Visible)
     end
 end)
 
 pages["Aimbot"].Visible = true
-print("[SUND3R1D4YS] v10 loaded. RightAlt — menu.")
+print("[SUND3R1D4YS] v11 loaded. RightAlt — menu.")
