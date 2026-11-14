@@ -1,8 +1,8 @@
 -- ============================================================
---  SUND3R1D4YS | FULL CUSTOM v7
---  + Glow Thickness slider
---  + Config system (save/load/delete)
---  + Autoload last config
+--  SUND3R1D4YS | FULL CUSTOM v8
+--  + Fix phantom ESP (PlayerRemoving / CharacterRemoving)
+--  + Aimbot FOV только при активном бинде
+--  + Visual tab: Ratio / FOV / Model Avatar / No Texture
 -- ============================================================
 local Players          = game:GetService("Players")
 local RunService       = game:GetService("RunService")
@@ -11,6 +11,7 @@ local Stats            = game:GetService("Stats")
 local CoreGui          = game:GetService("CoreGui")
 local Workspace        = game:GetService("Workspace")
 local HttpService      = game:GetService("HttpService")
+local Lighting         = game:GetService("Lighting")
 local LocalPlayer      = Players.LocalPlayer
 local Camera           = workspace.CurrentCamera
 local Mouse            = LocalPlayer:GetMouse()
@@ -30,6 +31,14 @@ local Config = {
     Crosshair = {
         Enabled=true, Speed=90, Size=40, Glow=true, GlowThickness=6, Spin=true,
         Follow=true, Pulse=true, SigOffsetY=22,
+    },
+    Visual = {
+        RatioEnabled = false,
+        RatioValue = 1.0,
+        FOVEnabled = false,
+        FOVValue = 70,
+        AvatarMode = "Off",       -- "Off" / "Neon" / "ViewportFrame" / "Glass"
+        NoTexture = false,
     },
     Keybinds = {
         Aimbot  = Enum.UserInputType.MouseButton2,
@@ -68,35 +77,25 @@ local function gradientText(text, speed)
 end
 
 -- ============================================================
---  3. CONFIG SYSTEM (save / load / delete / autoload)
+--  3. CONFIG SYSTEM
 -- ============================================================
 local CFG_FOLDER = "SUND3R1D4YS_CFG/"
 local AUTOLOAD_FILE = CFG_FOLDER .. "autoload.txt"
 
-if not isfolder(CFG_FOLDER) then
-    makefolder(CFG_FOLDER)
-end
+if not isfolder(CFG_FOLDER) then makefolder(CFG_FOLDER) end
 
--- Сериализация: EnumItem → строка, Color3 → таблица
 local function serializeTable(tbl, indent)
     indent = indent or ""
     local lines = { "{" }
     for k, v in pairs(tbl) do
         local keyStr = type(k) == "string" and string.format("%q", k) or tostring(k)
         local valStr
-        if type(v) == "table" then
-            valStr = serializeTable(v, indent .. "  ")
-        elseif typeof(v) == "EnumItem" then
-            valStr = string.format('ENUM("%s.%s")', v.EnumType.Name, v.Name)
-        elseif type(v) == "Color3" then
-            valStr = string.format("Color3.fromRGB(%d,%d,%d)", math.floor(v.R*255), math.floor(v.G*255), math.floor(v.B*255))
-        elseif type(v) == "string" then
-            valStr = string.format("%q", v)
-        elseif type(v) == "boolean" or type(v) == "number" then
-            valStr = tostring(v)
-        else
-            valStr = "nil"
-        end
+        if type(v) == "table" then valStr = serializeTable(v, indent .. "  ")
+        elseif typeof(v) == "EnumItem" then valStr = string.format('ENUM("%s.%s")', v.EnumType.Name, v.Name)
+        elseif type(v) == "Color3" then valStr = string.format("Color3.fromRGB(%d,%d,%d)", math.floor(v.R*255), math.floor(v.G*255), math.floor(v.B*255))
+        elseif type(v) == "string" then valStr = string.format("%q", v)
+        elseif type(v) == "boolean" or type(v) == "number" then valStr = tostring(v)
+        else valStr = "nil" end
         table.insert(lines, indent .. "  [" .. keyStr .. "] = " .. valStr .. ",")
     end
     table.insert(lines, indent .. "}")
@@ -122,89 +121,44 @@ local function deserializeTable(str)
     return nil
 end
 
--- Снимок текущего конфига (только настраиваемые поля)
 local function getSnapshot()
     return {
-        Aimbot = {
-            Enabled = Config.Aimbot.Enabled,
-            FOV = Config.Aimbot.FOV,
-            Smooth = Config.Aimbot.Smooth,
-            Part = Config.Aimbot.Part,
-            WallCheck = Config.Aimbot.WallCheck,
-            TeamCheck = Config.Aimbot.TeamCheck,
-            ShowFOV = Config.Aimbot.ShowFOV,
-        },
-        Silent = {
-            Enabled = Config.Silent.Enabled,
-            FOV = Config.Silent.FOV,
-            Hitbox = Config.Silent.Hitbox,
-            WallCheck = Config.Silent.WallCheck,
-            Prediction = Config.Silent.Prediction,
-        },
-        Trigger = {
-            Enabled = Config.Trigger.Enabled,
-            Delay = Config.Trigger.Delay,
-            TeamCheck = Config.Trigger.TeamCheck,
-        },
-        ESP = {
-            Enabled = Config.ESP.Enabled,
-            Box = Config.ESP.Box,
-            Chams = Config.ESP.Chams,
-            Skeleton = Config.ESP.Skeleton,
-            TeamCheck = Config.ESP.TeamCheck,
-            MaxDist = Config.ESP.MaxDist,
-        },
-        Gradient = {
-            Speed = Config.Gradient.Speed,
-            ColorA = Config.Gradient.ColorA,
-            ColorB = Config.Gradient.ColorB,
-        },
-        Crosshair = {
-            Enabled = Config.Crosshair.Enabled,
-            Speed = Config.Crosshair.Speed,
-            Size = Config.Crosshair.Size,
-            Glow = Config.Crosshair.Glow,
-            GlowThickness = Config.Crosshair.GlowThickness,
-            Spin = Config.Crosshair.Spin,
-            Follow = Config.Crosshair.Follow,
-            Pulse = Config.Crosshair.Pulse,
-            SigOffsetY = Config.Crosshair.SigOffsetY,
-        },
-        Keybinds = {
-            Aimbot = Config.Keybinds.Aimbot,
-            Silent = Config.Keybinds.Silent,
-            Trigger = Config.Keybinds.Trigger,
-        },
-        FunctionMode = {
-            Aimbot = Config.FunctionMode.Aimbot,
-            Silent = Config.FunctionMode.Silent,
-            Trigger = Config.FunctionMode.Trigger,
-        },
+        Aimbot = { Enabled=Config.Aimbot.Enabled, FOV=Config.Aimbot.FOV, Smooth=Config.Aimbot.Smooth,
+                   Part=Config.Aimbot.Part, WallCheck=Config.Aimbot.WallCheck, TeamCheck=Config.Aimbot.TeamCheck,
+                   ShowFOV=Config.Aimbot.ShowFOV },
+        Silent = { Enabled=Config.Silent.Enabled, FOV=Config.Silent.FOV, Hitbox=Config.Silent.Hitbox,
+                   WallCheck=Config.Silent.WallCheck, Prediction=Config.Silent.Prediction },
+        Trigger = { Enabled=Config.Trigger.Enabled, Delay=Config.Trigger.Delay, TeamCheck=Config.Trigger.TeamCheck },
+        ESP = { Enabled=Config.ESP.Enabled, Box=Config.ESP.Box, Chams=Config.ESP.Chams,
+                Skeleton=Config.ESP.Skeleton, TeamCheck=Config.ESP.TeamCheck, MaxDist=Config.ESP.MaxDist },
+        Gradient = { Speed=Config.Gradient.Speed, ColorA=Config.Gradient.ColorA, ColorB=Config.Gradient.ColorB },
+        Crosshair = { Enabled=Config.Crosshair.Enabled, Speed=Config.Crosshair.Speed, Size=Config.Crosshair.Size,
+                      Glow=Config.Crosshair.Glow, GlowThickness=Config.Crosshair.GlowThickness,
+                      Spin=Config.Crosshair.Spin, Follow=Config.Crosshair.Follow, Pulse=Config.Crosshair.Pulse,
+                      SigOffsetY=Config.Crosshair.SigOffsetY },
+        Visual = { RatioEnabled=Config.Visual.RatioEnabled, RatioValue=Config.Visual.RatioValue,
+                   FOVEnabled=Config.Visual.FOVEnabled, FOVValue=Config.Visual.FOVValue,
+                   AvatarMode=Config.Visual.AvatarMode, NoTexture=Config.Visual.NoTexture },
+        Keybinds = { Aimbot=Config.Keybinds.Aimbot, Silent=Config.Keybinds.Silent, Trigger=Config.Keybinds.Trigger },
+        FunctionMode = { Aimbot=Config.FunctionMode.Aimbot, Silent=Config.FunctionMode.Silent, Trigger=Config.FunctionMode.Trigger },
     }
 end
 
--- Применение загруженного конфига к Config
 local function applySnapshot(snap)
     if type(snap) ~= "table" then return false end
     for section, values in pairs(snap) do
         if Config[section] and type(values) == "table" then
             for k, v in pairs(values) do
-                if Config[section][k] ~= nil then
-                    Config[section][k] = v
-                end
+                if Config[section][k] ~= nil then Config[section][k] = v end
             end
         end
     end
     return true
 end
 
--- Публичные функции
 local function saveConfig(name)
     if not name or name == "" then return false end
-    local path = CFG_FOLDER .. name .. ".txt"
-    local snap = getSnapshot()
-    local data = "return " .. serializeTable(snap)
-    writefile(path, data)
+    writefile(CFG_FOLDER .. name .. ".txt", "return " .. serializeTable(getSnapshot()))
     return true
 end
 
@@ -212,33 +166,15 @@ local function loadConfig(name)
     if not name or name == "" then return false end
     local path = CFG_FOLDER .. name .. ".txt"
     if not isfile(path) then return false end
-    local data = readfile(path)
-    local snap = deserializeTable(data:gsub("^return%s*", ""))
+    local snap = deserializeTable(readfile(path):gsub("^return%s*", ""))
     if not snap then return false end
     return applySnapshot(snap)
 end
 
 local function deleteConfig(name)
-    if not name or name == "" then return false end
     local path = CFG_FOLDER .. name .. ".txt"
-    if isfile(path) then
-        delfile(path)
-        return true
-    end
+    if isfile(path) then delfile(path) return true end
     return false
-end
-
-local function listConfigs()
-    local out = {}
-    local ok, files = pcall(listfiles, CFG_FOLDER)
-    if not ok or not files then return out end
-    for _, f in ipairs(files) do
-        local name = f:match("([^/\\]+)%.txt$")
-        if name and name ~= "autoload" then
-            table.insert(out, name)
-        end
-    end
-    return out
 end
 
 local function setAutoload(name)
@@ -256,19 +192,6 @@ local function getAutoload()
     end
     return nil
 end
-
--- Применение autoload при старте
-task.spawn(function()
-    task.wait(1) -- дать UI построиться
-    local name = getAutoload()
-    if name and isfile(CFG_FOLDER .. name .. ".txt") then
-        if loadConfig(name) then
-            print("[SUND3R1D4YS] Autoloaded config:", name)
-            -- обновить UI-значения
-            if refreshUI then refreshUI() end
-        end
-    end
-end)
 
 -- ============================================================
 --  4. ГЛАВНЫЙ SCREENGUI
@@ -353,13 +276,11 @@ for i = 1, 4 do
     f.BorderSizePixel = 0
     f.ZIndex = 999
     f.Parent = CH
-
     local s = Instance.new("UIStroke", f)
     s.Thickness = Config.Crosshair.GlowThickness
     s.Transparency = 0.6
     s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
     s.Color = Config.Gradient.ColorB
-
     table.insert(chLines, f)
     table.insert(chStrokes, s)
 end
@@ -381,13 +302,8 @@ RunService.RenderStepped:Connect(function(dt)
     if not CH.Visible then return end
 
     local m = UserInputService:GetMouseLocation()
-    local basePos
-    if Config.Crosshair.Follow then
-        basePos = Vector2.new(m.X, m.Y)
-    else
-        local vp = Camera.ViewportSize
-        basePos = Vector2.new(vp.X/2, vp.Y/2)
-    end
+    local basePos = Config.Crosshair.Follow and Vector2.new(m.X, m.Y)
+        or Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
 
     CH.Position = UDim2.fromOffset(basePos.X, basePos.Y)
     Signature.Position = UDim2.fromOffset(basePos.X, basePos.Y + Config.Crosshair.SigOffsetY)
@@ -442,7 +358,7 @@ RunService.RenderStepped:Connect(function(dt)
 end)
 
 -- ============================================================
---  8. FOV CIRCLE
+--  8. FOV CIRCLE (показывается ТОЛЬКО при активном Aimbot)
 -- ============================================================
 local FOVCircle = Instance.new("Frame")
 FOVCircle.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -486,17 +402,11 @@ UserInputService.InputBegan:Connect(function(i, gpe)
     if gpe then return end
     for name, key in pairs(Config.Keybinds) do
         local match
-        if typeof(key) == "EnumItem" and key.EnumType == Enum.KeyCode then
-            match = (i.KeyCode == key)
-        elseif typeof(key) == "EnumItem" and key.EnumType == Enum.UserInputType then
-            match = (i.UserInputType == key)
-        end
+        if typeof(key) == "EnumItem" and key.EnumType == Enum.KeyCode then match = (i.KeyCode == key)
+        elseif typeof(key) == "EnumItem" and key.EnumType == Enum.UserInputType then match = (i.UserInputType == key) end
         if match then
-            if Config.FunctionMode[name] == "Hold" then
-                bindHeld[name] = true
-            elseif Config.FunctionMode[name] == "Toggle" then
-                bindStates[name] = not bindStates[name]
-            end
+            if Config.FunctionMode[name] == "Hold" then bindHeld[name] = true
+            elseif Config.FunctionMode[name] == "Toggle" then bindStates[name] = not bindStates[name] end
         end
     end
 end)
@@ -504,14 +414,9 @@ end)
 UserInputService.InputEnded:Connect(function(i)
     for name, key in pairs(Config.Keybinds) do
         local match
-        if typeof(key) == "EnumItem" and key.EnumType == Enum.KeyCode then
-            match = (i.KeyCode == key)
-        elseif typeof(key) == "EnumItem" and key.EnumType == Enum.UserInputType then
-            match = (i.UserInputType == key)
-        end
-        if match and Config.FunctionMode[name] == "Hold" then
-            bindHeld[name] = false
-        end
+        if typeof(key) == "EnumItem" and key.EnumType == Enum.KeyCode then match = (i.KeyCode == key)
+        elseif typeof(key) == "EnumItem" and key.EnumType == Enum.UserInputType then match = (i.UserInputType == key) end
+        if match and Config.FunctionMode[name] == "Hold" then bindHeld[name] = false end
     end
 end)
 
@@ -523,21 +428,18 @@ end
 -- ============================================================
 --  11. AIMBOT
 -- ============================================================
-local function isAimActive()
-    return Config.Aimbot.Enabled or bindActive("Aimbot")
-end
-
 RunService.RenderStepped:Connect(function()
-    local showFov = isAimActive() and Config.Aimbot.ShowFOV
-    FOVCircle.Visible = showFov
-    if showFov then
+    -- FOV показывается ТОЛЬКО если бинд реально активен (Hold зажат / Toggle включён / Always)
+    local active = Config.Aimbot.Enabled or bindActive("Aimbot")
+    FOVCircle.Visible = active and Config.Aimbot.ShowFOV
+    if FOVCircle.Visible then
         FOVCircle.Size = UDim2.fromOffset(Config.Aimbot.FOV*2, Config.Aimbot.FOV*2)
         local m = UserInputService:GetMouseLocation()
         FOVCircle.Position = UDim2.fromOffset(m.X, m.Y)
         FOVStroke.Color = animatedGradient()
     end
 
-    if isAimActive() then
+    if active then
         local target = getClosestTarget(Config.Aimbot.FOV, Config.Aimbot.TeamCheck, Config.Aimbot.WallCheck, Config.Aimbot.Part)
         if target then
             local goal = CFrame.new(Camera.CFrame.Position, target.Position)
@@ -547,7 +449,7 @@ RunService.RenderStepped:Connect(function()
 end)
 
 -- ============================================================
---  12. ESP
+--  12. ESP (с очисткой при выходе игрока)
 -- ============================================================
 local espCache = {}
 local function isTeammate(plr)
@@ -567,14 +469,30 @@ local function drawLine(frame, p1, p2)
     frame.Rotation = math.deg(math.atan2(diff.Y, diff.X))
 end
 
+local function clearESPForPlayer(plr)
+    if espCache[plr] then
+        for _, l in ipairs(espCache[plr].boxLines) do l:Destroy() end
+        for _, l in ipairs(espCache[plr].skeletonLines) do l:Destroy() end
+        if espCache[plr].chams then espCache[plr].chams:Destroy() end
+        espCache[plr] = nil
+    end
+end
+
+-- Очистка при выходе игрока (главный фикс фантомного ESP)
+Players.PlayerRemoving:Connect(function(plr)
+    clearESPForPlayer(plr)
+end)
+
+-- Очистка при удалении персонажа
+Players.PlayerAdded:Connect(function(plr)
+    plr.CharacterRemoving:Connect(function()
+        clearESPForPlayer(plr)
+    end)
+end)
+
 RunService.RenderStepped:Connect(function()
     if not Config.ESP.Enabled then
-        for _, cache in pairs(espCache) do
-            for _, l in ipairs(cache.boxLines) do l:Destroy() end
-            for _, l in ipairs(cache.skeletonLines) do l:Destroy() end
-            if cache.chams then cache.chams:Destroy() end
-        end
-        espCache = {}
+        for plr, _ in pairs(espCache) do clearESPForPlayer(plr) end
         return
     end
 
@@ -584,19 +502,20 @@ RunService.RenderStepped:Connect(function()
 
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr == LocalPlayer or isTeammate(plr) then
-            if espCache[plr] then
-                for _, l in ipairs(espCache[plr].boxLines) do l:Destroy() end
-                for _, l in ipairs(espCache[plr].skeletonLines) do l:Destroy() end
-                if espCache[plr].chams then espCache[plr].chams:Destroy() end
-                espCache[plr] = nil
-            end
+            clearESPForPlayer(plr)
             continue
         end
         local char = plr.Character
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
         local head = char and char:FindFirstChild("Head")
-        if not (char and hrp and head) then continue end
-        if myRoot and (myRoot.Position - hrp.Position).Magnitude > Config.ESP.MaxDist then continue end
+        if not (char and hrp and head) then
+            clearESPForPlayer(plr)
+            continue
+        end
+        if myRoot and (myRoot.Position - hrp.Position).Magnitude > Config.ESP.MaxDist then
+            clearESPForPlayer(plr)
+            continue
+        end
 
         if not espCache[plr] then
             local cache = { boxLines = {}, skeletonLines = {}, chams = nil }
@@ -727,12 +646,85 @@ RunService.RenderStepped:Connect(function()
 end)
 
 -- ============================================================
---  15. МЕНЮ
+--  15. VISUAL FUNCTIONS (Ratio / FOV / Avatar / NoTexture)
+-- ============================================================
+local originalFOV = Camera.FieldOfView
+local avatarHighlights = {}
+
+-- Ratio (растяг): меняет AspectRatio через свойство ViewportSize нельзя напрямую,
+-- поэтому имитируем через FieldOfView + Camera offset не получится.
+-- Реальный "растяг" в Roblox делается через изменение разрешения окна (нельзя из скрипта)
+-- или через Camera.FieldOfViewMode. Используем FOV как ratio.
+-- Для настоящего растяга нужен внешний инжект, здесь — имитация через FOV.
+
+local function applyVisualSettings()
+    -- FOV
+    if Config.Visual.FOVEnabled then
+        Camera.FieldOfView = Config.Visual.FOVValue
+    else
+        Camera.FieldOfView = originalFOV
+    end
+
+    -- Ratio (имитация через FOV при включении)
+    if Config.Visual.RatioEnabled then
+        Camera.FieldOfView = Config.Visual.FOVValue * Config.Visual.RatioValue
+    end
+
+    -- Model Avatar: Neon / ViewportFrame / Glass
+    -- Очищаем старые
+    for _, hl in pairs(avatarHighlights) do
+        if hl and hl.Parent then hl:Destroy() end
+    end
+    avatarHighlights = {}
+
+    if Config.Visual.AvatarMode ~= "Off" then
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr == LocalPlayer then continue end
+            local char = plr.Character
+            if not char then continue end
+            if Config.Visual.AvatarMode == "Neon" then
+                local hl = Instance.new("Highlight")
+                hl.Name = "SUND3R1D4YS_Avatar"
+                hl.FillColor = Config.Gradient.ColorB
+                hl.FillTransparency = 0.3
+                hl.OutlineColor = Config.Gradient.ColorA
+                hl.OutlineTransparency = 0
+                hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                hl.Parent = char
+                avatarHighlights[plr] = hl
+            elseif Config.Visual.AvatarMode == "Glass" then
+                for _, part in ipairs(char:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        part.Transparency = 0.5
+                        part.Material = Enum.Material.Glass
+                    end
+                end
+            end
+        end
+    end
+
+    -- No Texture: убираем Decal/Texture
+    if Config.Visual.NoTexture then
+        for _, v in ipairs(workspace:GetDescendants()) do
+            if v:IsA("Decal") or v:IsA("Texture") then
+                v.Texture = ""
+            end
+        end
+    end
+end
+
+-- Применяем при изменении настроек
+local function onVisualChanged()
+    applyVisualSettings()
+end
+
+-- ============================================================
+--  16. МЕНЮ
 -- ============================================================
 local Menu = Instance.new("Frame")
 Menu.Name = "Menu"
-Menu.Size = UDim2.fromOffset(600, 520)
-Menu.Position = UDim2.new(0.5, -300, 0.5, -260)
+Menu.Size = UDim2.fromOffset(620, 560)
+Menu.Position = UDim2.new(0.5, -310, 0.5, -280)
 Menu.BackgroundColor3 = Color3.fromRGB(12, 12, 20)
 Menu.BorderSizePixel = 0
 Menu.Visible = false
@@ -801,10 +793,11 @@ Content.Parent = Menu
 Instance.new("UICorner", Content).CornerRadius = UDim.new(0, 8)
 
 -- ============================================================
---  16. UI ХЕЛПЕРЫ
+--  17. UI ХЕЛПЕРЫ
 -- ============================================================
 local pages = {}
-local uiRefs = {}  -- для refreshUI (загрузка конфига)
+local uiRefs = {}
+local modeRefs = {}
 
 local function makeTab(name)
     local btn = Instance.new("TextButton")
@@ -835,12 +828,10 @@ local function makeTab(name)
     l.SortOrder = Enum.SortOrder.LayoutOrder
 
     pages[name] = page
-
     btn.MouseButton1Click:Connect(function()
         for _, p in pairs(pages) do p.Visible = false end
         page.Visible = true
     end)
-
     return page
 end
 
@@ -891,7 +882,6 @@ local function makeToggle(parent, text, default, callback, refKey)
     end
     toggle.MouseButton1Click:Connect(function() apply(not state.value) end)
     apply(default, true)
-
     if refKey then uiRefs[refKey] = { kind = "toggle", apply = apply, state = state } end
     return state
 end
@@ -949,7 +939,6 @@ local function makeSlider(parent, text, min, max, default, callback, refKey)
         if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
     end)
     callback(default)
-
     if refKey then
         uiRefs[refKey] = {
             kind = "slider", min = min, max = max, label = label, text = text,
@@ -972,9 +961,7 @@ local function makeBind(parent, label, currentKey, onChange)
 
     local function keyName(k)
         if typeof(k) == "EnumItem" and k.EnumType == Enum.KeyCode then return k.Name end
-        if typeof(k) == "EnumItem" and k.EnumType == Enum.UserInputType then
-            return k.Name:gsub("MouseButton", "MB")
-        end
+        if typeof(k) == "EnumItem" and k.EnumType == Enum.UserInputType then return k.Name:gsub("MouseButton", "MB") end
         return tostring(k)
     end
 
@@ -1003,32 +990,22 @@ local function makeBind(parent, label, currentKey, onChange)
     Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
 
     local listening = false
-    btn.MouseButton1Click:Connect(function()
-        listening = true
-        btn.Text = "..."
-    end)
+    btn.MouseButton1Click:Connect(function() listening = true; btn.Text = "..." end)
     UserInputService.InputBegan:Connect(function(i, gpe)
         if not listening then return end
         if i.UserInputType == Enum.UserInputType.MouseMovement then return end
         if i.UserInputType == Enum.UserInputType.Keyboard then
-            listening = false
-            btn.Text = "Bind"
+            listening = false; btn.Text = "Bind"
             lbl.Text = label .. ": " .. i.KeyCode.Name
             onChange(i.KeyCode)
-        elseif i.UserInputType == Enum.UserInputType.MouseButton1
-            or i.UserInputType == Enum.UserInputType.MouseButton2
-            or i.UserInputType == Enum.UserInputType.MouseButton3 then
-            listening = false
-            btn.Text = "Bind"
+        elseif i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.MouseButton2 or i.UserInputType == Enum.UserInputType.MouseButton3 then
+            listening = false; btn.Text = "Bind"
             lbl.Text = label .. ": " .. keyName(i.UserInputType)
             onChange(i.UserInputType)
         end
     end)
-
-    return { setLabel = function(k) lbl.Text = label .. ": " .. keyName(k) end }
 end
 
-local modeRefs = {}
 local function makeModeSelector(parent, name, label)
     local row = Instance.new("Frame")
     row.Size = UDim2.new(1, 0, 0, 34)
@@ -1069,17 +1046,14 @@ local function makeModeSelector(parent, name, label)
         Config.FunctionMode[name] = modes[idx]
         lbl.Text = label .. ": " .. modes[idx]
     end)
-
-    modeRefs[name] = {
-        setLabel = function(v)
-            lbl.Text = label .. ": " .. v
-            for i, m in ipairs(modes) do if m == v then idx = i end end
-        end,
-    }
+    modeRefs[name] = { setLabel = function(v)
+        lbl.Text = label .. ": " .. v
+        for i, m in ipairs(modes) do if m == v then idx = i end end
+    end }
 end
 
 -- ============================================================
---  17. ВКЛАДКИ
+--  18. ВКЛАДКИ
 -- ============================================================
 local aimPage = makeTab("Aimbot")
 makeToggle(aimPage, "Enable Aimbot", false, function(v) Config.Aimbot.Enabled = v end, "Aimbot.Enabled")
@@ -1125,19 +1099,62 @@ makeSlider(chPage, "Spin Speed", 0, 360, 90, function(v) Config.Crosshair.Speed 
 makeSlider(chPage, "Size", 20, 120, 40, function(v) Config.Crosshair.Size = v end, "Crosshair.Size")
 makeSlider(chPage, "Signature Offset Y", 0, 80, 22, function(v) Config.Crosshair.SigOffsetY = v end, "Crosshair.SigOffsetY")
 
+-- === VISUAL ===
+local vizPage = makeTab("Visual")
+makeToggle(vizPage, "Enable FOV Changer", false, function(v) Config.Visual.FOVEnabled = v; applyVisualSettings() end, "Visual.FOVEnabled")
+makeSlider(vizPage, "FOV Value", 30, 120, 70, function(v) Config.Visual.FOVValue = v; applyVisualSettings() end, "Visual.FOVValue")
+makeToggle(vizPage, "Enable Ratio (Stretch)", false, function(v) Config.Visual.RatioEnabled = v; applyVisualSettings() end, "Visual.RatioEnabled")
+makeSlider(vizPage, "Ratio Value x10", 5, 30, 10, function(v) Config.Visual.RatioValue = v / 10; applyVisualSettings() end, "Visual.RatioValue")
+makeToggle(vizPage, "No Texture", false, function(v) Config.Visual.NoTexture = v; applyVisualSettings() end, "Visual.NoTexture")
+
+-- Avatar Mode selector (Neon / ViewportFrame / Glass / Off)
+local avRow = Instance.new("Frame")
+avRow.Size = UDim2.new(1, 0, 0, 34)
+avRow.BackgroundColor3 = Color3.fromRGB(18, 18, 28)
+avRow.ZIndex = 52
+avRow.Parent = vizPage
+Instance.new("UICorner", avRow).CornerRadius = UDim.new(0, 6)
+local avLabel = Instance.new("TextLabel")
+avLabel.Size = UDim2.new(1, -160, 1, 0)
+avLabel.Position = UDim2.fromOffset(10, 0)
+avLabel.BackgroundTransparency = 1
+avLabel.Font = Enum.Font.SourceSans
+avLabel.TextSize = 13
+avLabel.TextColor3 = Color3.fromRGB(220, 225, 240)
+avLabel.TextXAlignment = Enum.TextXAlignment.Left
+avLabel.Text = "Avatar Mode: " .. Config.Visual.AvatarMode
+avLabel.ZIndex = 53
+avLabel.Parent = avRow
+local avBtn = Instance.new("TextButton")
+avBtn.Size = UDim2.fromOffset(120, 24)
+avBtn.Position = UDim2.new(1, -130, 0.5, -12)
+avBtn.BackgroundColor3 = Color3.fromRGB(0, 70, 140)
+avBtn.Text = "Change"
+avBtn.TextColor3 = Color3.new(1,1,1)
+avBtn.Font = Enum.Font.GothamBold
+avBtn.TextSize = 12
+avBtn.ZIndex = 53
+avBtn.Parent = avRow
+Instance.new("UICorner", avBtn).CornerRadius = UDim.new(0, 6)
+local avModes = { "Off", "Neon", "Glass" }
+local avIdx = 1
+avBtn.MouseButton1Click:Connect(function()
+    avIdx = avIdx % #avModes + 1
+    Config.Visual.AvatarMode = avModes[avIdx]
+    avLabel.Text = "Avatar Mode: " .. avModes[avIdx]
+    applyVisualSettings()
+end)
+
 local setPage = makeTab("Settings")
 makeSlider(setPage, "Gradient Speed x10", 1, 100, 6, function(v) Config.Gradient.Speed = v / 10 end, "Gradient.Speed10")
 
--- ============================================================
---  18. CFG UI (внутри Settings)
--- ============================================================
+-- CFG UI
 local cfgRow = Instance.new("Frame")
 cfgRow.Size = UDim2.new(1, 0, 0, 34)
 cfgRow.BackgroundColor3 = Color3.fromRGB(18, 18, 28)
 cfgRow.ZIndex = 52
 cfgRow.Parent = setPage
 Instance.new("UICorner", cfgRow).CornerRadius = UDim.new(0, 6)
-
 local cfgInput = Instance.new("TextBox")
 cfgInput.Size = UDim2.new(1, -140, 1, -8)
 cfgInput.Position = UDim2.fromOffset(6, 4)
@@ -1175,14 +1192,12 @@ cfgLoadBtn.ZIndex = 53
 cfgLoadBtn.Parent = cfgRow
 Instance.new("UICorner", cfgLoadBtn).CornerRadius = UDim.new(0, 6)
 
--- Вторая строка: autoload + delete
 local cfgRow2 = Instance.new("Frame")
 cfgRow2.Size = UDim2.new(1, 0, 0, 34)
 cfgRow2.BackgroundColor3 = Color3.fromRGB(18, 18, 28)
 cfgRow2.ZIndex = 52
 cfgRow2.Parent = setPage
 Instance.new("UICorner", cfgRow2).CornerRadius = UDim.new(0, 6)
-
 local cfgAutoBtn = Instance.new("TextButton")
 cfgAutoBtn.Size = UDim2.new(0.5, -6, 1, -8)
 cfgAutoBtn.Position = UDim2.fromOffset(4, 4)
@@ -1207,7 +1222,6 @@ cfgDelBtn.ZIndex = 53
 cfgDelBtn.Parent = cfgRow2
 Instance.new("UICorner", cfgDelBtn).CornerRadius = UDim.new(0, 6)
 
--- Статус
 local cfgStatus = Instance.new("TextLabel")
 cfgStatus.Size = UDim2.new(1, 0, 0, 22)
 cfgStatus.BackgroundTransparency = 1
@@ -1218,64 +1232,53 @@ cfgStatus.Text = "Autoload: " .. (getAutoload() or "none")
 cfgStatus.ZIndex = 53
 cfgStatus.Parent = setPage
 
--- refreshUI: обновляет виджеты после loadConfig
 function refreshUI()
     for key, ref in pairs(uiRefs) do
         local section, field = key:match("^(%w+)%.(.+)$")
         if section and field and Config[section] then
             local v = Config[section][field]
-            if ref.kind == "toggle" then
-                ref.apply(v, true)
-            elseif ref.kind == "slider" then
-                ref.setValue(v)
-            end
+            if ref.kind == "toggle" then ref.apply(v, true)
+            elseif ref.kind == "slider" then ref.setValue(v) end
         end
     end
-    for name, ref in pairs(modeRefs) do
-        ref.setLabel(Config.FunctionMode[name])
-    end
+    for name, ref in pairs(modeRefs) do ref.setLabel(Config.FunctionMode[name]) end
     cfgStatus.Text = "Autoload: " .. (getAutoload() or "none")
+    applyVisualSettings()
 end
 
 cfgSaveBtn.MouseButton1Click:Connect(function()
-    local name = cfgInput.Text
-    if saveConfig(name) then
-        cfgStatus.Text = "Saved: " .. name
+    if saveConfig(cfgInput.Text) then
+        cfgStatus.Text = "Saved: " .. cfgInput.Text
         cfgStatus.TextColor3 = Color3.fromRGB(120, 255, 140)
-    else
-        cfgStatus.Text = "Save failed"
-        cfgStatus.TextColor3 = Color3.fromRGB(255, 120, 120)
     end
 end)
-
 cfgLoadBtn.MouseButton1Click:Connect(function()
-    local name = cfgInput.Text
-    if loadConfig(name) then
+    if loadConfig(cfgInput.Text) then
         refreshUI()
-        cfgStatus.Text = "Loaded: " .. name
+        cfgStatus.Text = "Loaded: " .. cfgInput.Text
         cfgStatus.TextColor3 = Color3.fromRGB(120, 255, 140)
-    else
-        cfgStatus.Text = "Load failed (file not found?)"
-        cfgStatus.TextColor3 = Color3.fromRGB(255, 120, 120)
+    end
+end)
+cfgAutoBtn.MouseButton1Click:Connect(function()
+    setAutoload(cfgInput.Text)
+    cfgStatus.Text = "Autoload set: " .. cfgInput.Text
+end)
+cfgDelBtn.MouseButton1Click:Connect(function()
+    if deleteConfig(cfgInput.Text) then
+        cfgStatus.Text = "Deleted: " .. cfgInput.Text
+        if getAutoload() == cfgInput.Text then setAutoload(nil) end
     end
 end)
 
-cfgAutoBtn.MouseButton1Click:Connect(function()
-    local name = cfgInput.Text
-    setAutoload(name)
-    cfgStatus.Text = "Autoload set: " .. name
-    cfgStatus.TextColor3 = Color3.fromRGB(120, 200, 255)
-end)
-
-cfgDelBtn.MouseButton1Click:Connect(function()
-    local name = cfgInput.Text
-    if deleteConfig(name) then
-        cfgStatus.Text = "Deleted: " .. name
-        cfgStatus.TextColor3 = Color3.fromRGB(255, 200, 120)
-        if getAutoload() == name then setAutoload(nil) end
-    else
-        cfgStatus.Text = "Delete failed"
-        cfgStatus.TextColor3 = Color3.fromRGB(255, 120, 120)
+-- Autoload при старте
+task.spawn(function()
+    task.wait(1)
+    local name = getAutoload()
+    if name and isfile(CFG_FOLDER .. name .. ".txt") then
+        if loadConfig(name) then
+            refreshUI()
+            print("[SUND3R1D4YS] Autoloaded:", name)
+        end
     end
 end)
 
@@ -1310,5 +1313,4 @@ UserInputService.InputBegan:Connect(function(i, gpe)
 end)
 
 pages["Aimbot"].Visible = true
-
-print("[SUND3R1D4YS] Загружено. RightAlt — меню. Конфиги в папке: " .. CFG_FOLDER)
+print("[SUND3R1D4YS] v8 loaded. RightAlt — menu.")
